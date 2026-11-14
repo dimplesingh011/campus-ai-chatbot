@@ -1,5 +1,8 @@
 import os
+import json
 import uuid
+import urllib.request
+import urllib.error
 from datetime import datetime
 from typing import List, Optional
 import fitz  # PyMuPDF
@@ -8,8 +11,6 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
 
 load_dotenv()
 
@@ -28,9 +29,9 @@ app.add_middleware(
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection(name="college_docs")
 
-# Initialize Gemini Client
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-ai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY and GEMINI_API_KEY != "your_google_gemini_api_key_here" else None
+# Initialize Groq API Key
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_MODEL = "openai/gpt-oss-120b"
 
 
 class ChatRequest(BaseModel):
@@ -119,6 +120,36 @@ def seed_mock_data():
         })
 
     collection.add(ids=ids, documents=documents, metadatas=metadatas)
+
+
+def call_groq_llm(system_instruction: str, user_prompt: str) -> str:
+    """Calls Groq's OpenAI-compatible Chat Completions API using Python's built-in urllib."""
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.2,
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+            "User-Agent": "CampusAI-Backend/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data["choices"][0]["message"]["content"]
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"HTTP {e.code}: {error_body}")
 
 
 @app.on_event("startup")
@@ -236,7 +267,7 @@ def chat_with_docs(request: ChatRequest):
         page = meta.get("page", 1)
         citation_key = f"{fname} — Page {page}"
 
-        context_blocks.append(f"\n{doc_text}")
+        context_blocks.append(f"[{citation_key}]\n{doc_text}")
         retrieved_context.append({
             "source": citation_key,
             "text": doc_text,
@@ -265,23 +296,15 @@ def chat_with_docs(request: ChatRequest):
 
     prompt = f"CONTEXT FROM COLLEGE DOCUMENTS:\n{combined_context}\n\nSTUDENT QUESTION:\n{request.query}"
 
-    # Generate response using Gemini API (with graceful fallback if key isn't set yet)
-    if ai_client:
+    # Generate response using Groq API
+    if GROQ_API_KEY and GROQ_API_KEY != "your_groq_api_key_here":
         try:
-            response = ai_client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    temperature=0.2,
-                ),
-            )
-            answer_text = response.text
+            answer_text = call_groq_llm(system_instruction, prompt)
         except Exception as e:
-            answer_text = f"⚠️ Gemini API Error: {str(e)}\n\n**Top Retrieved Excerpt:**\n{docs[0]}"
+            answer_text = f"⚠️ Groq API Error: {str(e)}\n\n**Top Retrieved Excerpt:**\n{docs[0]}"
     else:
         answer_text = (
-            "⚠️ *Running in Local Demo Mode (No `GEMINI_API_KEY` detected in `backend/.env`).*\n\n"
+            "⚠️ *Running in Local Demo Mode (No `GROQ_API_KEY` detected).*\n\n"
             f"Based on **{citations[0]['label']}**, here is the relevant college rule:\n\n> {docs[0]}"
         )
 
