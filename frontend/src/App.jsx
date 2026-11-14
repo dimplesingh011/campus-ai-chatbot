@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import {
   GraduationCap,
@@ -16,6 +15,7 @@ import {
   CheckCircle2,
   AlertCircle,
 } from 'lucide-react';
+
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const QUICK_PROMPTS = [
@@ -61,7 +61,7 @@ export default function App() {
 
   const fetchDocuments = async () => {
     try {
-      const res = await fetch('/api/documents');
+      const res = await fetch(`${API_BASE}/api/documents`);
       const data = await res.json();
       setDocuments(data.documents || []);
     } catch (err) {
@@ -79,7 +79,7 @@ export default function App() {
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query }),
@@ -126,7 +126,7 @@ export default function App() {
     formData.append('category', selectedCategory);
 
     try {
-      const res = await fetch('/api/upload', {
+      const res = await fetch(`${API_BASE}/api/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -147,7 +147,7 @@ export default function App() {
 
   const handleDeleteDocument = async (filename) => {
     try {
-      await fetch(`/api/documents/${encodeURIComponent(filename)}`, {
+      await fetch(`${API_BASE}/api/documents/${encodeURIComponent(filename)}`, {
         method: 'DELETE',
       });
       fetchDocuments();
